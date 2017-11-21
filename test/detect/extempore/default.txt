@@ -1,0 +1,239 @@
+;; quickstart
+
+(println "Hello, World!")
+
+(bind-func sine:DSP
+  (lambda (in time chan dat)
+    (* .1 (cos (* (convert time) .04)))))
+
+(dsp:set! sine)
+
+;; audio signal processing
+(bind-func dsp
+  (lambda (in:SAMPLE time:i64 chan:i64 data:SAMPLE*)
+    (* .1 (sin (/ (* 2.0 3.1415
+                     440.0
+                     (i64tof (% time 44100)))
+                  44100.0)))))
+
+(dsp:set! dsp)
+
+(bind-func dsp
+  (lambda (in:SAMPLE time:i64 chan:i64 data:SAMPLE*)
+    (* (convert 0.1 SAMPLE) (random))))
+
+(bind-func osc_c
+  (lambda (phase)
+    (lambda (amp freq:SAMPLE)
+      (let ((incr (* 2.0 3.1415 (/ freq 44100.))))
+        (set! phase (% (+ phase incr) (* 2.0 3.1415)))
+        (* amp (sin phase))))))
+
+(bind-func dsp
+  (let ((osc1 (osc_c 0.0))
+        (osc2 (osc_c 0.0)))
+    (lambda (in:float time:i64 channel:i64 data:float*)
+      (cond
+       ;; play a 200Hz tone in the left ear
+       ((= channel 0) (osc1 0.25 200.0))
+       ;; play a 300Hz tone in the right ear
+       ((= channel 1) (osc2 0.25 300.0))
+       (else 0.0)))))
+
+(bind-func dsp
+  (let ((osc1 (osc_c 0.0))
+        (osc2 (osc_c 0.0)))
+    (lambda (in:float time:i64 channel:i64 data:float*)
+      (cond
+       ;; play a 200Hz tone in the left ear
+       ((= channel 0) (osc1 0.25 200.0))
+       ;; play a 300Hz tone in the right ear
+       ((= channel 1) (osc2 0.25 300.0))
+       (else 0.0)))))
+
+(bind-func dsp:DSP
+  (let ((osc1 (osc_c 0.0))
+        (osc2 (osc_c 0.0))
+        (osc3 (osc_c 0.0)))
+    (lambda (in time channel data)
+      (cond ((= channel 1)
+             (+ (osc1 0.5 220.0)
+                (osc2 0.5 350.0)))
+            ((= channel 0)
+             (osc3 0.5 210.0))
+            (else 0.0)))))
+
+(bind-func tuple_maker
+  (lambda (a:i64)
+    (let ((tup:<i64,i64>* (alloc)))
+      (tset! tup 0 a)
+      (tset! tup 1 a)
+      tup)))
+
+(bind-func test
+  (lambda (a:i64)
+    (let ((tup (tuple_maker a)))
+      (printf "<%d,%d>\n"
+              (tref tup 0)
+              (tref tup 1))
+      tup)))
+
+(test 4)
+
+(bind-alias osc_t [SAMPLE,SAMPLE,SAMPLE]*)
+
+(bind-func dsp:DSP
+  (let ((osc_tuple:<osc_t,osc_t,osc_t>* (alloc)))
+    (tfill! osc_tuple (osc_c 0.0) (osc_c 0.0) (osc_c 0.0))
+    (lambda (in time channel data)
+      (cond ((= channel 1)
+             (+ ((tref osc_tuple 0) 0.5 300.0)
+                ((tref osc_tuple 1) 0.5 420.0)))
+            ((= channel 0)
+             ((tref osc_tuple 2) 0.5 600.0))
+            (else 0.0)))))
+
+(bind-func dsp:DSP
+  (let ((osc_array:|30,[SAMPLE,SAMPLE,SAMPLE]*|* (alloc))
+        (amp_array:|30,SAMPLE|* (alloc))
+        (freq_array:|30,SAMPLE|* (alloc))
+        (i 0))
+    ;; initialise the arrays
+    (dotimes (i 30)
+      (aset! osc_array i (osc_c 0.0))
+      (aset! amp_array i (+ 0.2 (* 0.2 (random))))
+      (aset! freq_array i (+ 110.0 (* 1000.0 (random)))))
+    ;; this is the dsp closure
+    (lambda (in time chan data)
+      (cond ((= chan 0) ; left channel
+             (let ((suml 0.0))
+               (dotimes (i 15) ; sum over the first 15 oscs
+                 (set! suml (+ suml ((aref osc_array i)
+                                     (aref amp_array i)
+                                     (aref freq_array i)))))
+               (/ suml 15.0))) ; normalise over all oscs
+            ((= chan 1) ; right channel
+             (let ((sumr 0.0))
+               (dotimes (i 15 15) ; sum over the first 15 oscs
+                 (set! sumr (+ sumr ((aref osc_array i)
+                                     (aref amp_array i)
+                                     (aref freq_array i)))))
+               (/ sumr 15.0)))
+            (else 0.0))))) ; any remaining channels
+
+(bind-func dsp:DSP
+  (let ((osc_array:|30,[SAMPLE,SAMPLE,SAMPLE]*|* (alloc))
+        (amp_array:|30,SAMPLE|* (alloc))
+        (freq_array:|30,SAMPLE|* (alloc))
+        (base_freq 110.0)
+        (i 0))
+    ;; initialise the arrays
+    (dotimes (i 30)
+      (aset! osc_array i (osc_c 0.0))
+      (aset! amp_array
+             i
+             (if (= (modulo i 2) 0)
+                 0.3
+                 0.0))
+      (aset! freq_array i (* (convert (+ i 1) SAMPLE) base_freq)))
+    (lambda (in time chan data)
+      (let ((sum 0.0))
+        (dotimes (i 30)
+          (set! sum (+ sum ((aref osc_array i)
+                            (aref amp_array i)
+                            (aref freq_array i)))))
+        (/ sum 30.0))))) ; normalise over all oscs
+
+(sys:load "libs/core/instruments.xtm")
+
+(bind-func saw_synth_note
+  (lambda ()
+    (lambda (data:NoteData* nargs:i64 dargs:SAMPLE*)
+      (let ((starttime (note_starttime data))
+            (frequency 440.0)
+            (amplitude 0.5)
+            (duration SR)
+            (saw (saw_c 0.)))
+        (lambda (time:i64 chan:i64)
+          ;; when the note has played for its duration, we disable it
+          (if (> (- time starttime) duration) (note_active data #f))
+          (if (< chan 2)
+              (saw amplitude frequency)
+              0.0))))))
+
+(sys:load "libs/core/instruments.xtm")
+
+(bind-func saw_synth_note
+  (lambda ()
+    (lambda (data:NoteData* nargs:i64 dargs:SAMPLE*)
+      (let ((starttime (note_starttime data))
+
+            ;; we're now pulling this information from data
+            (frequency (note_frequency data))
+            (amplitude (note_amplitude data))
+            (duration (note_duration data))
+
+            (sawl (saw_c 0.))
+            (sawr (saw_c 0.)))
+        (lambda (time:i64 chan:i64)
+          (if (> (- time starttime) duration) (note_active data #f))
+          (cond ((= chan 0) (sawl amplitude frequency))
+                ((= chan 1) (sawr amplitude frequency))
+                (else 0.0)))))))
+
+(bind-func saw_synth_fx
+  (lambda ()
+    (let ((notekernel:NOTE_KERNEL null))
+      (lambda (in:SAMPLE time:i64 chan:i64 dat:SAMPLE*)
+        in))))
+
+(bind-func saw_synth_fx 200000 ; extra memory for the delay lines
+  (lambda ()
+    (let ((notekernel:NOTE_KERNEL null)
+          (delayl (delay_c 22050))
+          (delayr (delay_c 22050)))
+      (lambda (in:SAMPLE time:i64 chan:i64 dat:SAMPLE*)
+        (cond ((= chan 0)
+               (delayl in 0.3 0.2))
+              ((= chan 1)
+               (delayr in 0.3 0.2))
+              (else 0.0))))))
+
+(bind-instrument saw_synth saw_synth_note_c saw_synth_fx)
+(make-instrument saw_synth saw_synth)
+(make-instrument fmsynth fmsynth)
+
+(bind-func dsp:DSP
+  (lambda (in time chan dat)
+    (if (< chan 2)
+        (saw_synth in time chan dat)
+        0.0)))
+
+(dsp:set! dsp)
+
+(play saw_synth 60 0.5 1.0)
+(play-note (now) saw_synth (random 60 90) 80 (* 2 44100))
+
+(bind-func dsp:DSP
+  (lambda (in time chan dat)
+    (if (< chan 2)
+        (fmsynth in time chan dat)
+        0.0)))
+
+(play-note (now) fmsynth (random 60 90) 80 44100)
+
+(macro-expand '(make-instrument saw_synth saw_synth))
+
+;; here it is
+(define-macro (make-instrument defname synthname . args)
+  (let* ((note (append (string->sexpr (string-append "(" (symbol->string synthname) "_note)")) args))
+         (fx (string->sexpr (string-append "(" (symbol->string synthname) "_fx)"))))
+    `(begin
+       (eval (bind-val ,defname INSTRUMENT (make_instrument ,note ,fx))
+             (interaction-environment))
+       (eval (define ,defname (call-as-xtlang-leaky ,defname))
+             (interaction-environment))
+       (print-with-colors 'default 'default #f (print 'New 'instrument 'bound 'as ""))
+       (print-with-colors 'green 'default #t (print ',defname ""))
+       (print-with-colors 'default 'default #f (println 'in 'both 'scheme 'and 'xtlang))
+       #t)))
